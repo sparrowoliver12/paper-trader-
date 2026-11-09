@@ -120,5 +120,64 @@ class CryptoTests(unittest.TestCase):
             self.assertEqual(s2["last_bar"], bars[-1].date)
 
 
+class BettingTests(unittest.TestCase):
+    def test_fee_and_break_even(self):
+        from paper_trader.betting import taker_fee, break_even_win_rate
+        self.assertAlmostEqual(taker_fee(0.5, 0.07), 0.0175)
+        self.assertAlmostEqual(break_even_win_rate(0.51, 0.07), 0.51 + 0.07 * 0.51 * 0.49)
+
+    def test_decide_needs_edge(self):
+        from paper_trader.betting import decide, Quote
+        q = Quote(0.51, 0.51)
+        self.assertIsNone(decide(0.52, q, 0.07, 0))          # 52% < 51c + 1.75c fee
+        self.assertEqual(decide(0.60, q, 0.07, 0)[0], "UP")
+        self.assertEqual(decide(0.40, q, 0.07, 0)[0], "DOWN")
+        self.assertIsNone(decide(0.60, q, 0.07, 0.10))       # min_edge filter
+
+    def test_settle_pays_one_dollar_per_share(self):
+        from paper_trader.betting import Bet, settle
+        win = settle(Bet("w", "UP", 0.6, 0.5, 10, 0.1, "x"), 100, 100)  # tie goes to UP
+        self.assertEqual(win.outcome, "UP")
+        self.assertAlmostEqual(win.pnl, 10 - 5.1)
+        lose = settle(Bet("w", "UP", 0.6, 0.5, 10, 0.1, "x"), 100, 99)
+        self.assertAlmostEqual(lose.pnl, -5.1)
+
+    def test_backtest_coin_never_bets_and_bankroll_never_negative(self):
+        from paper_trader.betting import backtest, CoinFlip, Momentum
+        bars = synthetic(500, start=90_000, drift=0, vol=0.003, interval_minutes=15)
+        self.assertEqual(len(backtest(bars, CoinFlip()).bets), 0)
+        r = backtest(bars, Momentum(), bankroll=50, stake=10)
+        self.assertGreaterEqual(r.end, 0)
+
+    def test_perfect_foresight_profits(self):
+        from paper_trader.betting import backtest, Predictor
+        bars = synthetic(300, start=90_000, drift=0, vol=0.003, interval_minutes=15)
+        answers = iter(1.0 if b.close >= b.open else 0.0 for b in bars[1:])
+        class Cheat(Predictor):
+            name = "cheat"
+            def predict(self, closes):
+                return next(answers)
+        self.assertGreater(backtest(bars, Cheat()).end, 1000)
+
+    def test_live_tick_bet_then_settle(self):
+        from datetime import datetime, timezone
+        from paper_trader.bet_live import load, tick
+        from paper_trader.betting import Momentum, Quote
+        bars = [Bar(f"2024-01-01 0{i // 4}:{i % 4 * 15:02d}", 90_000 + 10 * i, 90_000 + 10 * i - 5) for i in range(40)]
+        state = load("/nonexistent/x.json", 1000)
+        pred = Momentum(strength=0.4)  # strong lean so it always bets
+        t0 = datetime(2024, 1, 1, 10, 0, 8, tzinfo=timezone.utc)  # window 10:00 is open
+        lines = tick(state, bars, pred, Quote(0.5, 0.5), 10, 0.07, 0, t0)
+        self.assertIn("BET", lines[0])
+        self.assertLess(state["bankroll"], 1000)
+        self.assertEqual(tick(state, bars, pred, Quote(0.5, 0.5), 10, 0.07, 0, t0), [])  # same window: no-op
+        finished = bars + [Bar("2024-01-01 10:00", 90_100, 90_000)]  # BTC went UP
+        t1 = datetime(2024, 1, 1, 10, 15, 8, tzinfo=timezone.utc)
+        out = tick(state, finished, pred, Quote(0.5, 0.5), 10, 0.07, 0, t1)
+        self.assertIn("settled", out[0])
+        self.assertEqual(len(state["history"]), 1)
+        self.assertEqual(state["history"][0]["outcome"], "UP")
+
+
 if __name__ == "__main__":
     unittest.main()

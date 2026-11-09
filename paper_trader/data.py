@@ -12,6 +12,7 @@ from datetime import date, datetime, timedelta, timezone
 class Bar:
     date: str  # "2024-01-02" for daily bars, "2024-01-02 13:45" (UTC) for intraday
     close: float
+    open: float | None = None  # needed for up/down betting; None if the source lacks it
 
 
 def parse_time(raw: str) -> str:
@@ -39,11 +40,14 @@ def load_csv(path: str) -> list[Bar]:
     cols = {c.strip().lower(): c for c in (reader.fieldnames or [])}
     time_col = next((cols[k] for k in ("unix", "timestamp", "open time", "date", "datetime", "time") if k in cols), None)
     close_col = cols.get("adj close") or cols.get("close")
+    open_col = cols.get("open")
     if not time_col or not close_col:
         raise ValueError(f"{path}: need a time column and a 'Close' column, found {reader.fieldnames}")
     for row in reader:
         try:
-            bars.append(Bar(parse_time(row[time_col]), float(row[close_col])))
+            o = row.get(open_col) if open_col else None
+            bars.append(Bar(parse_time(row[time_col]), float(row[close_col]),
+                            float(o) if o not in (None, "", "null") else None))
         except (ValueError, TypeError, AttributeError):
             continue  # skip blank / 'null' rows
     bars.sort(key=lambda b: b.date)
@@ -55,8 +59,8 @@ def load_csv(path: str) -> list[Bar]:
 def save_csv(bars: list[Bar], path: str) -> None:
     with open(path, "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["Date", "Close"])
-        w.writerows((b.date, b.close) for b in bars)
+        w.writerow(["Date", "Open", "Close"])
+        w.writerows((b.date, "" if b.open is None else b.open, b.close) for b in bars)
 
 
 def synthetic(n: int = 500, start: float = 100.0, drift: float = 0.0003, vol: float = 0.015,
@@ -77,7 +81,8 @@ def synthetic(n: int = 500, start: float = 100.0, drift: float = 0.0003, vol: fl
     else:
         t = datetime(2024, 1, 1)
         for _ in range(n):
+            prev = round(price, 2)
             price *= math.exp(drift - vol * vol / 2 + vol * rng.gauss(0, 1))
-            bars.append(Bar(t.strftime("%Y-%m-%d %H:%M"), round(price, 2)))
+            bars.append(Bar(t.strftime("%Y-%m-%d %H:%M"), round(price, 2), prev))
             t += timedelta(minutes=interval_minutes)
     return bars

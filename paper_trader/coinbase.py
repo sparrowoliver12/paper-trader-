@@ -37,7 +37,7 @@ def parse_candles(rows: list, granularity: int, now: float | None = None) -> lis
     for r in rows:
         start = int(r[0])
         if start + granularity <= now:
-            out[start] = Bar(datetime.fromtimestamp(start, timezone.utc).strftime("%Y-%m-%d %H:%M"), float(r[4]))
+            out[start] = Bar(datetime.fromtimestamp(start, timezone.utc).strftime("%Y-%m-%d %H:%M"), float(r[4]), float(r[3]))
     return [out[k] for k in sorted(out)]
 
 

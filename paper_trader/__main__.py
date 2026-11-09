@@ -3,6 +3,9 @@
   python -m paper_trader [backtest options]        backtest (default command)
   python -m paper_trader fetch [options]           download crypto candles from Coinbase
   python -m paper_trader live  [options]           live paper trading on real prices
+  python -m paper_trader bet   [options]           backtest 15-min Bitcoin Up/Down betting
+  python -m paper_trader bet-live [options]        live paper betting (Polymarket odds if available)
+  python -m paper_trader probe                     check the Polymarket odds hookup
 """
 from __future__ import annotations
 
@@ -129,9 +132,81 @@ def cmd_live(argv):
              args.size, args.state, args.log, once=args.once)
 
 
+def add_bet_args(p):
+    from .betting import PREDICTORS
+    p.add_argument("--model", choices=sorted(PREDICTORS), default="momentum",
+                   help="how to estimate the chance BTC goes up")
+    p.add_argument("--lookback", type=int, default=4, help="momentum/reversion: windows to look back")
+    p.add_argument("--strength", type=float, default=None,
+                   help="how far from 50%% the model leans (default 0.06; rsi 0.10)")
+    p.add_argument("--bankroll", type=float, default=1000, help="starting fake money")
+    p.add_argument("--stake", type=float, default=10, help="dollars per bet")
+    p.add_argument("--fee-rate", type=float, default=0.07,
+                   help="fee = rate x price x (1-price) per share; 0.07 = 1.75c at 50c. Match your app.")
+    p.add_argument("--min-edge", type=float, default=0.0,
+                   help="only bet when expected profit per share beats this (e.g. 0.02 = 2c)")
+    p.add_argument("--spread", type=float, default=0.02, help="assumed odds: UP and DOWN each cost 50c + spread/2")
+
+
+def build_predictor(args):
+    from .betting import PREDICTORS, RsiPredictor
+    cls = PREDICTORS[args.model]
+    if args.model in ("momentum", "reversion"):
+        return cls(args.lookback, args.strength if args.strength is not None else 0.06)
+    if args.model == "rsi":
+        return RsiPredictor(strength=args.strength if args.strength is not None else 0.10)
+    return cls()
+
+
+def cmd_bet_backtest(argv):
+    from .betting import backtest
+    p = argparse.ArgumentParser(prog="paper_trader bet",
+                                description="Backtest 15-minute Bitcoin Up/Down betting with fake money.")
+    p.add_argument("--csv", help="15-min BTC candles (from `fetch`). Omit for synthetic practice data.")
+    p.add_argument("--bars", type=int, default=2880, help="synthetic length (2880 = 30 days)")
+    p.add_argument("--seed", type=int, default=42)
+    add_bet_args(p)
+    p.add_argument("--compare", action="store_true", help="also show 'bet UP every window' as a baseline")
+    args = p.parse_args(argv)
+    if args.csv:
+        bars, src = load_csv(args.csv), args.csv
+    else:
+        bars = synthetic(args.bars, start=90_000, drift=0, vol=0.55 / 35_040 ** 0.5, seed=args.seed, interval_minutes=15)
+        src = f"synthetic ({args.bars} windows, seed {args.seed})"
+    print(f"Data: {src}  |  {bars[0].date} → {bars[-1].date} UTC  |  FAKE MONEY ONLY")
+    print(f"Odds assumed: UP and DOWN each {50 + args.spread * 50:.0f}¢  |  fee rate {args.fee_rate}\n")
+    kw = dict(bankroll=args.bankroll, stake=args.stake, fee_rate=args.fee_rate,
+              min_edge=args.min_edge, spread=args.spread)
+    print(f"Model: {args.model}")
+    print(backtest(bars, build_predictor(args), **kw).summary())
+    if args.compare:
+        print("\nBaseline: bet UP every window")
+        print(backtest(bars, build_predictor(args), always="UP", **kw).summary())
+
+
+def cmd_bet_live(argv):
+    from .bet_live import run
+    p = argparse.ArgumentParser(prog="paper_trader bet-live",
+                                description="Live PAPER betting on 15-min Bitcoin Up/Down. Fake money only.")
+    add_bet_args(p)
+    p.add_argument("--no-polymarket", action="store_true", help="use assumed odds even if polymarket-us is installed")
+    p.add_argument("--state", default="bet_state.json")
+    p.add_argument("--log", default="bet_log.csv")
+    p.add_argument("--once", action="store_true", help="run one cycle and exit (for schedulers)")
+    args = p.parse_args(argv)
+    run(build_predictor(args), args.bankroll, args.stake, args.fee_rate, args.min_edge, args.spread,
+        not args.no_polymarket, args.state, args.log, args.once)
+
+
+def cmd_probe(argv):
+    from .polymarket import probe
+    probe()
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    commands = {"backtest": cmd_backtest, "fetch": cmd_fetch, "live": cmd_live}
+    commands = {"backtest": cmd_backtest, "fetch": cmd_fetch, "live": cmd_live,
+                "bet": cmd_bet_backtest, "bet-live": cmd_bet_live, "probe": cmd_probe}
     if argv and argv[0] in commands:
         return commands[argv.pop(0)](argv)
     return cmd_backtest(argv)

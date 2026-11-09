@@ -21,7 +21,58 @@ python -m paper_trader --csv AAPL.csv --symbol AAPL --compare
 
 Results (every trade, plus your daily account value) are saved to `results/trades.csv` and `results/equity.csv`, which open in Excel or Google Sheets.
 
-## 15-minute Bitcoin
+## Polymarket-style 15-minute "Bitcoin Up or Down" betting (paper)
+
+Prediction markets such as Polymarket US run a new market every 15 minutes: *will BTC end this window at or above where it started?* A winning share pays **$1**. You buy UP or DOWN at the market price, for example 51¢.
+
+This mode **paper bets** on those windows: fake money, no account, no orders.
+
+**1. Get real 15-minute BTC data**, then backtest a model on it:
+
+```bash
+python3 -m paper_trader fetch --days 60
+python3 -m paper_trader bet --csv btc_15m.csv --model momentum --compare
+python3 -m paper_trader bet --csv btc_15m.csv --model reversion
+python3 -m paper_trader bet --csv btc_15m.csv --model rsi
+```
+
+**2. Run it live:**
+
+```bash
+pip3 install polymarket-us        # optional: real Polymarket odds (read-only, no account)
+python3 -m paper_trader probe     # check the odds hookup works
+python3 -m paper_trader bet-live --model reversion
+```
+
+Every 15 minutes it settles the last fake bet, predicts the new window, and bets if the model sees an edge:
+
+```
+[2026-11-09 18:30 UTC] BTC $xx,xxx | model 53% up | UP 51¢ / DOWN 51¢ (assumed) | no edge, skip
+[2026-11-09 18:45 UTC] BTC $xx,xxx | model 56% up | UP 51¢ / DOWN 51¢ (assumed) | BET UP 19.0 sh @ 51¢ = $10.00
+  settled 2026-11-09 18:45: bet UP, BTC went DOWN → LOST $-10.00   bankroll $990.00
+```
+
+State is saved in `bet_state.json` (Ctrl+C, then rerun to resume). Every settled bet goes to `bet_log.csv`.
+
+### How it decides
+
+- A **model** estimates the chance BTC goes up this window. `momentum` leans the way the last few windows went, `reversion` leans the other way, `rsi` uses the RSI indicator, and `coin` always says 50% (so it never bets).
+- **Edge** = model's probability − price − fee. It bets only when edge > `--min-edge`.
+- **Fee**: `--fee-rate 0.07` charges 0.07 × price × (1 − price) per share, which is 1.75¢ at 50¢. **Check what your app actually charges** and set this to match (0 if it's free).
+
+### Reading the results
+
+The number that matters is **Win rate vs Break-even rate**. At ~51¢ plus fees, you must win about **52–53%** of bets just to break even. **Brier score** measures how good the probabilities are: 0.2500 is a coin flip, and anything not clearly below that has no real predictive power.
+
+### Honest caveats
+
+- Over 15 minutes, Bitcoin's direction is very close to random, and these markets are full of fast professional bots. Most people who bet on them lose money over time.
+- Backtests assume 50/50 odds with a spread, because historical Polymarket order books aren't freely available. Real odds move with the market, which usually makes edges *smaller* than the backtest shows.
+- BTC prices here come from Coinbase. Polymarket settles on a Chainlink BTC/USD feed, so a window that barely moves can resolve differently.
+- The Polymarket odds hookup is read-only and best-effort. If it can't find the current market, it says so and falls back to assumed odds.
+- Run it for a few weeks and hundreds of bets before trusting a result. Even then, a backtest that wins is not proof the strategy will win with real money.
+
+## 15-minute Bitcoin (trading, not betting)
 
 Three commands. All use **fake money**. Prices come from Coinbase's free public market data, with no account or API key needed.
 

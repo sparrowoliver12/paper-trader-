@@ -6,3 +6,6 @@ live_state.json
 live_state.json.tmp
 live_log.csv
 *_15m.csv
+bet_state.json
+bet_state.json.tmp
+bet_log.csv
