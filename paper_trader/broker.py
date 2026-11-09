@@ -1,6 +1,7 @@
 """A simulated (paper) broker. No real money, no real orders — ever."""
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -72,10 +73,20 @@ class PaperBroker:
         self.cash += fill * qty - fee
         return self._log(time, symbol, "sell", qty, fill, fee)
 
-    def buy_with_fraction(self, symbol: str, fraction: float, price: float, time: str | None = None):
-        """Spend `fraction` of available cash (whole shares only)."""
-        per_share = price * (1 + self.slippage_pct) * (1 + self.fee_pct)
-        qty = int((self.cash * fraction) // per_share)
+    def buy_with_fraction(self, symbol: str, fraction: float, price: float, time: str | None = None,
+                          fractional: bool = False):
+        """Spend `fraction` of available cash.
+
+        Whole shares only by default; fractional=True allows amounts like 0.0312 BTC.
+        """
+        per_unit = price * (1 + self.slippage_pct) * (1 + self.fee_pct)
+        budget = self.cash * fraction
+        if fractional:
+            qty = math.floor(budget / per_unit * 1e8) / 1e8  # round down to 8 decimals (1 satoshi)
+            if qty * price < 1.0:  # don't bother with dust trades under $1
+                return None
+        else:
+            qty = int(budget // per_unit)
         return self.buy(symbol, qty, price, time) if qty > 0 else None
 
     def close(self, symbol: str, price: float, time: str | None = None):

@@ -21,7 +21,47 @@ python -m paper_trader --csv AAPL.csv --symbol AAPL --compare
 
 Results (every trade, plus your daily account value) are saved to `results/trades.csv` and `results/equity.csv`, which open in Excel or Google Sheets.
 
-## Getting real price data
+## 15-minute Bitcoin
+
+Three commands. All use **fake money**. Prices come from Coinbase's free public market data, with no account or API key needed.
+
+**1. Download real 15-minute BTC prices** (60 days ≈ 5,760 candles, takes ~10 seconds):
+
+```bash
+python3 -m paper_trader fetch --product BTC-USD --interval 15m --days 60
+```
+
+This writes `btc_15m.csv`.
+
+**2. Backtest on them:**
+
+```bash
+python3 -m paper_trader --market crypto --csv btc_15m.csv --compare
+python3 -m paper_trader --market crypto --csv btc_15m.csv --strategy rsi --compare
+```
+
+`--market crypto` turns on fractional BTC (e.g. 0.0312 BTC), 24/7 math for the stats, and a **0.6% fee per trade** by default, about what a small account pays as a taker fee on a crypto exchange. Set your real fee with `--fee` (0.006 = 0.6%). The output shows total **Fees paid**: watch that number. On 15-minute bars, fees are usually what kills a strategy.
+
+**3. Run it live:**
+
+```bash
+python3 -m paper_trader live --strategy rsi
+```
+
+Every 15 minutes, just after a candle closes, it fetches the latest real BTC price, asks the strategy what to do, and makes a fake trade. It prints a line each time:
+
+```
+[2026-11-09 18:15 UTC] BTC $xx,xxx.xx | BUY 0.105432 @ $xx,xxx.xx | equity $9,940.00 (-0.60%)
+```
+
+- Your fake account is saved to `live_state.json`. Stop with **Ctrl+C**, then run the same command later to resume where you left off.
+- Every candle is logged to `live_log.csv`, which opens in Excel or Google Sheets.
+- To start over with fresh fake cash, delete `live_state.json`.
+- It only trades while the command is running, so your computer has to stay awake. To run it 24/7, put it on an always-on machine such as a Raspberry Pi or a cheap cloud server. Alternatively, run `live --once` from a scheduler every 15 minutes.
+
+Strategy settings are in *bars*, not days. On 15-minute data, `--fast 10 --slow 30` means 2.5 hours vs 7.5 hours.
+
+## Getting real stock price data
 
 Download daily prices as a CSV from Yahoo Finance (search a ticker → *Historical Data* → *Download*) or from stooq.com. Any CSV with a `Date` column and a `Close` (or `Adj Close`) column works.
 

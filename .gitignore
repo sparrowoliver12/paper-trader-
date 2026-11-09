@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 results/
 .venv/
+live_state.json
+live_state.json.tmp
+live_log.csv
+*_15m.csv
