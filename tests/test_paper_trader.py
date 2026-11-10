@@ -197,6 +197,22 @@ class PolymarketTests(unittest.TestCase):
         self.assertAlmostEqual(q2.up_ask, 0.45)
         self.assertIsNone(pm.quote_from(market, {"marketData": {"bestBid": None, "bestAsk": "0.57"}}))
 
+    def test_real_polymarket_shape(self):
+        """Shape copied from a real probe of a BTC Up or Down 15m market."""
+        from paper_trader import polymarket as pm
+        market = {"slug": "cpc-btc-updown-15m-2026-11-10-1800z", "feeCoefficient": 0.095,
+                  "marketSides": [{"description": "Yes", "long": True}, {"description": "No", "long": False}]}
+        bbo = {"marketData": {"bestAsk": {"value": "0.8000"}, "bestBid": {"value": "0.7900"},
+                              "longQuote": {"value": "0.8000"}, "shortQuote": {"value": "0.21"}}}
+        self.assertEqual(pm.sides(market), ("up", "down"))
+        q = pm.quote_from(market, bbo)
+        self.assertAlmostEqual(q.up_ask, 0.80)
+        self.assertAlmostEqual(q.down_ask, 0.21)
+        self.assertAlmostEqual(q.fee_rate, 0.095)
+        event = {"title": "BTC Up or Down 15m", "slug": "btc-updown-15m-2026-11-10-1800z", "category": "crypto",
+                 "startTime": "2026-11-10T18:00:00Z", "endDate": "2026-11-10T18:15:00Z"}
+        self.assertTrue(pm.looks_like_btc_15m(event))
+
 
 if __name__ == "__main__":
     unittest.main()

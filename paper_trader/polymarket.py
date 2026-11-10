@@ -11,7 +11,10 @@ What the public API looks like (from a real probe):
   - each event has "markets"; each market has "marketSides", one with
     long=true and one with long=false, each with a "description" ("Up"/"Down")
     and a last "price". Markets also carry a "feeCoefficient".
-  - markets.bbo(slug) gives bestBid / bestAsk for the market's LONG side.
+  - the long side is labeled "Yes" (= Up), the short side "No" (= Down).
+  - markets.bbo(slug) gives longQuote / shortQuote (cost to buy each side) and
+    bestBid / bestAsk for the long side.
+  - Settlement uses CF Benchmarks' BRTI index (60-second averages), not Coinbase.
 
 If anything can't be found, live mode falls back to assumed 50/50 odds and says so.
 Run `python3 -m paper_trader probe` to see what the API returns.
@@ -133,12 +136,19 @@ def current_btc_15m_event(client=None, now=None):
 
 # ---------------------------------------------------------------- prices
 
+UP_WORDS = ("up", "yes", "higher", "above")
+DOWN_WORDS = ("down", "no", "lower", "below")
+
+
 def sides(market) -> tuple[str | None, str | None]:
-    """Which outcome the market's long side and short side stand for ('up'/'down')."""
+    """Which outcome the market's long side and short side stand for ('up'/'down').
+
+    Polymarket US labels them "Yes"/"No": Yes = BTC finished at or above the start price.
+    """
     long_label = short_label = None
     for s in market.get("marketSides") or []:
-        d = str(s.get("description", "")).lower()
-        label = "up" if "up" in d else "down" if "down" in d else None
+        d = str(s.get("description", "")).strip().lower()
+        label = "up" if d in UP_WORDS else "down" if d in DOWN_WORDS else None
         if s.get("long"):
             long_label = label
         else:
@@ -151,15 +161,22 @@ def sides(market) -> tuple[str | None, str | None]:
 def quote_from(market, bbo) -> Quote | None:
     """Turn a market + its best bid/ask into the cost of buying UP and DOWN."""
     data = bbo.get("marketData", bbo) if isinstance(bbo, dict) else {}
-    ask, bid = _money(data.get("bestAsk")), _money(data.get("bestBid"))
     long_label, _ = sides(market)
-    if long_label is None or ask is None or bid is None:
+    if long_label is None:
         return None
-    long_cost, short_cost = ask, 1 - bid  # buying the short side = selling the long side
+    # Polymarket US quotes each side's buy price directly (longQuote / shortQuote).
+    long_cost, short_cost = _money(data.get("longQuote")), _money(data.get("shortQuote"))
+    if long_cost is None or short_cost is None:  # fall back to the order book
+        ask, bid = _money(data.get("bestAsk")), _money(data.get("bestBid"))
+        if ask is None or bid is None:
+            return None
+        long_cost, short_cost = ask, 1 - bid  # buying the short side = selling the long side
     up, down = (long_cost, short_cost) if long_label == "up" else (short_cost, long_cost)
     if not (0 < up < 1 and 0 < down < 1):
         return None
-    return Quote(round(up, 4), round(down, 4), f"polymarket:{market.get('slug', '?')}")
+    fee = market.get("feeCoefficient")
+    return Quote(round(up, 4), round(down, 4), f"polymarket:{market.get('slug', '?')}",
+                 float(fee) if fee is not None else None)
 
 
 def fee_coefficient(event) -> float | None:

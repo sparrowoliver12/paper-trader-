@@ -68,7 +68,8 @@ The number that matters is **Win rate vs Break-even rate**. At ~51¢ plus fees, 
 
 - Over 15 minutes, Bitcoin's direction is very close to random, and these markets are full of fast professional bots. Most people who bet on them lose money over time.
 - Backtests assume 50/50 odds with a spread, because historical Polymarket order books aren't freely available. Real odds move with the market, which usually makes edges *smaller* than the backtest shows.
-- BTC prices here come from Coinbase. Polymarket settles on a Chainlink BTC/USD feed, so a window that barely moves can resolve differently.
+- BTC prices here come from Coinbase. Polymarket US settles on CF Benchmarks' BRTI index (an average over the last 60 seconds), so a window that barely moves can resolve differently.
+- Live mode uses each market's own fee coefficient (0.095 on the 15-minute BTC markets when last checked). Backtests use `--fee-rate`, so pass `--fee-rate 0.095` to match.
 - The Polymarket odds hookup is read-only and best-effort. If it can't find the current market, it says so and falls back to assumed odds.
 - Run it for a few weeks and hundreds of bets before trusting a result. Even then, a backtest that wins is not proof the strategy will win with real money.
 

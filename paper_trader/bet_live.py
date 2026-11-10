@@ -69,6 +69,8 @@ def tick(state: dict, bars, predictor: Predictor, quote: Quote, stake: float, fe
     state["last_window"] = window
     closes = [b.close for b in bars]
     p_up = predictor.predict(closes)
+    if quote.fee_rate is not None:
+        fee_rate = quote.fee_rate  # use the fee the real market says it charges
     bet = None if state.get("open_bet") else place(window, p_up, quote, state["bankroll"], stake, fee_rate, min_edge)
     price_line = f"UP {quote.up_ask * 100:.0f}¢ / DOWN {quote.down_ask * 100:.0f}¢ ({quote.source})"
     if bet:

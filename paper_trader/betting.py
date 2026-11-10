@@ -38,6 +38,7 @@ class Quote:
     up_ask: float
     down_ask: float
     source: str = "assumed"
+    fee_rate: float | None = None  # the market's own fee coefficient, when known
 
 
 def assumed_quote(spread: float = 0.02) -> Quote:
