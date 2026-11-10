@@ -9,3 +9,4 @@ live_log.csv
 bet_state.json
 bet_state.json.tmp
 bet_log.csv
+probe_output.json

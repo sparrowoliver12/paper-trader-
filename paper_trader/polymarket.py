@@ -57,26 +57,49 @@ def _money(x):
         return None
 
 
+def _text(e) -> str:
+    return " ".join(str(e.get(k, "")) for k in ("title", "slug", "ticker", "identifier", "description", "category")).lower()
+
+
+def looks_like_btc(e) -> bool:
+    t = _text(e)
+    return "btc" in t or "bitcoin" in t
+
+
+def looks_like_btc_15m(e) -> bool:
+    t = _text(e)
+    return looks_like_btc(e) and ("up or down" in t or "updown" in t or "up-or-down" in t) and "15" in t
+
+
+def scan_events(client, pages: int = 20, params: dict | None = None):
+    """Yield active events page by page. Stops if the API repeats a page (ignores offset)."""
+    offset, seen = 0, set()
+    for _ in range(pages):
+        q = {"limit": 100, "offset": offset, "active": True, **(params or {})}
+        events = _items(client.events.list(q), "events")
+        if not events:
+            return
+        key = str(events[0].get("id") or events[0].get("slug"))
+        if key in seen:
+            return
+        seen.add(key)
+        yield from events
+        offset += len(events)
+
+
 def current_btc_15m_event(client=None, now=None):
-    """Find the open 'Bitcoin Up or Down' event whose window contains `now`."""
+    """Find the open 'Bitcoin Up or Down' 15-minute event whose window contains `now`."""
     client = client or _client()
     now = now or datetime.now(timezone.utc)
     best = None
-    offset = 0
-    for _ in range(10):  # page through active events
-        events = _items(client.events.list({"limit": 100, "offset": offset, "active": True}), "events")
-        if not events:
-            break
-        for e in events:
-            title = str(e.get("title", "")).lower()
-            if not all(k in title for k in KEYWORDS) or "15" not in (title + str(e.get("slug", ""))):
-                continue
-            start, end = _time(e.get("startTime") or e.get("startDate")), _time(e.get("endTime") or e.get("endDate"))
-            if start and end and start <= now < end:
-                return e
-            if end and end > now and (best is None or end < _time(best.get("endTime") or best.get("endDate"))):
-                best = e
-        offset += len(events)
+    for e in scan_events(client):
+        if not looks_like_btc_15m(e):
+            continue
+        start, end = _time(e.get("startTime") or e.get("startDate")), _time(e.get("endTime") or e.get("endDate"))
+        if start and end and start <= now < end:
+            return e
+        if end and end > now and (best is None or end < _time(best.get("endTime") or best.get("endDate"))):
+            best = e
     return best
 
 
@@ -112,19 +135,62 @@ def quote(client=None) -> Quote | None:
     return Quote(up_ask, down_ask, f"polymarket:{event.get('slug', '?')}")
 
 
-def probe() -> None:
-    """Print what the public API returns, to debug the hookup."""
+def _short(e) -> str:
+    when = e.get("startTime") or e.get("startDate") or "?"
+    return f"  - {str(e.get('title'))[:70]!r}  slug={e.get('slug')}  start={when}"
+
+
+def probe(out_path: str = "probe_output.json") -> None:
+    """Search Polymarket's public data for Bitcoin markets and print a short summary.
+
+    The full raw data is saved to probe_output.json, so it can be shared for debugging.
+    """
     if not available():
         print("The polymarket-us package isn't installed. Run:  pip3 install polymarket-us")
         return
     client = _client()
+    dump: dict = {}
+
+    print("Scanning active events...")
+    events = list(scan_events(client))
+    btc = [e for e in events if looks_like_btc(e)]
+    print(f"Scanned {len(events)} active events; {len(btc)} mention Bitcoin/BTC.")
+    for e in btc[:15]:
+        print(_short(e))
+    dump["btc_events"] = btc[:20]
+    dump["first_event_keys"] = sorted(events[0].keys()) if events else []
+
+    for params in ({"category": "crypto"}, {"tag": "crypto"}, {"search": "bitcoin"}, {"query": "bitcoin"}):
+        try:
+            got = _items(client.events.list({"limit": 50, "active": True, **params}), "events")
+            hits = [e for e in got if looks_like_btc(e)]
+            print(f"Filter {params}: {len(got)} events, {len(hits)} Bitcoin")
+            for e in hits[:5]:
+                print(_short(e))
+            dump[f"filter_{list(params.items())[0][0]}"] = got[:10]
+        except Exception as ex:  # unsupported filter
+            print(f"Filter {params}: not supported ({type(ex).__name__})")
+
+    try:
+        markets = _items(client.markets.list({"limit": 100, "active": True}), "markets")
+        mb = [m for m in markets if looks_like_btc(m)]
+        print(f"Markets list: {len(markets)} markets, {len(mb)} Bitcoin")
+        for m in mb[:5]:
+            print(_short(m))
+        dump["btc_markets"] = mb[:10]
+        dump["first_market"] = markets[:1]
+    except Exception as ex:
+        print(f"Markets list failed: {ex}")
+
     event = current_btc_15m_event(client)
-    if not event:
-        print("Could not find an open 15-minute Bitcoin Up or Down event via the public API.")
-        sample = _items(client.events.list({"limit": 5, "active": True}), "events")
-        print("First few active events, for reference:")
-        print(json.dumps(sample, indent=2, default=str)[:4000])
-        return
-    print("Found event:")
-    print(json.dumps(event, indent=2, default=str)[:4000])
-    print("\nQuote:", quote(client))
+    print("\n15-minute Bitcoin event found:", _short(event) if event else "NO")
+    if event:
+        dump["found_event"] = event
+        try:
+            print("Live odds:", quote(client))
+        except Exception as ex:
+            print(f"Found the event but reading odds failed: {ex}")
+
+    with open(out_path, "w") as f:
+        json.dump(dump, f, indent=2, default=str)
+    print(f"\nFull details saved to {out_path}")
