@@ -179,5 +179,24 @@ class BettingTests(unittest.TestCase):
         self.assertEqual(state["history"][0]["outcome"], "UP")
 
 
+class PolymarketTests(unittest.TestCase):
+    def test_finds_15m_btc_and_prices_both_sides(self):
+        from paper_trader import polymarket as pm
+        ev = lambda mins: {"title": "Bitcoin Up or Down", "slug": "btc-updown", "category": "crypto",
+                           "startTime": "2026-11-10T18:00:00Z", "endDate": f"2026-11-10T18:{mins:02d}:00Z"}
+        self.assertTrue(pm.looks_like_btc_15m(ev(15)))
+        self.assertFalse(pm.looks_like_btc_15m(ev(5)))   # 5-minute market
+        self.assertFalse(pm.looks_like_btc_15m({"title": "Philadelphia vs. Green Bay", "category": "sports"}))
+        market = {"slug": "x", "marketSides": [{"description": "Down", "long": False}, {"description": "Up", "long": True}]}
+        q = pm.quote_from(market, {"marketData": {"bestBid": {"value": "0.55"}, "bestAsk": "0.57"}})
+        self.assertAlmostEqual(q.up_ask, 0.57)
+        self.assertAlmostEqual(q.down_ask, 0.45)
+        flipped = {"slug": "x", "marketSides": [{"description": "Down", "long": True}, {"description": "Up", "long": False}]}
+        q2 = pm.quote_from(flipped, {"marketData": {"bestBid": "0.55", "bestAsk": "0.57"}})
+        self.assertAlmostEqual(q2.down_ask, 0.57)
+        self.assertAlmostEqual(q2.up_ask, 0.45)
+        self.assertIsNone(pm.quote_from(market, {"marketData": {"bestBid": None, "bestAsk": "0.57"}}))
+
+
 if __name__ == "__main__":
     unittest.main()
