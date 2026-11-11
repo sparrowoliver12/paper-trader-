@@ -214,5 +214,19 @@ class PolymarketTests(unittest.TestCase):
         self.assertTrue(pm.looks_like_btc_15m(event))
 
 
+class LateEntryTests(unittest.TestCase):
+    def test_no_bet_mid_window(self):
+        from datetime import datetime, timezone
+        from paper_trader.bet_live import load, tick
+        from paper_trader.betting import Momentum, Quote
+        bars = [Bar(f"2024-01-01 0{i // 4}:{i % 4 * 15:02d}", 90_000 + 10 * i, 90_000 + 10 * i - 5) for i in range(40)]
+        state = load("/nonexistent/x.json", 1000)
+        late = datetime(2024, 1, 1, 10, 4, 0, tzinfo=timezone.utc)  # 4 minutes in
+        out = tick(state, bars, Momentum(strength=0.4), Quote(0.30, 0.71), 10, 0.095, 0, late)
+        self.assertIn("too late", out[0])
+        self.assertIsNone(state["open_bet"])
+        self.assertEqual(state["bankroll"], 1000)
+
+
 if __name__ == "__main__":
     unittest.main()

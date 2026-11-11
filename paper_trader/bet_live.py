@@ -18,6 +18,7 @@ from . import coinbase, polymarket
 from .betting import Bet, Predictor, Quote, assumed_quote, place, settle
 
 WINDOW = 900  # 15 minutes
+MAX_ENTRY_SECONDS = 90  # only bet near the start of a window, before the odds react to new moves
 
 
 def load(path: str, bankroll: float) -> dict:
@@ -68,6 +69,13 @@ def tick(state: dict, bars, predictor: Predictor, quote: Quote, stake: float, fe
     state["waiting"] = False
     state["last_window"] = window
     closes = [b.close for b in bars]
+    into = int(now.timestamp() % WINDOW)
+    if into > MAX_ENTRY_SECONDS and not state.get("open_bet"):
+        # The market has already seen part of this window; our model hasn't. Betting now
+        # would mistake the market's newer information for an "edge".
+        out.append(f"[{window} UTC] BTC ${closes[-1]:,.2f} | {into // 60}m{into % 60:02d}s into the window, "
+                   f"too late to bet fairly; waiting for the next one")
+        return out
     p_up = predictor.predict(closes)
     if quote.fee_rate is not None:
         fee_rate = quote.fee_rate  # use the fee the real market says it charges
