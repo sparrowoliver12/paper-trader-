@@ -102,7 +102,7 @@ def run(predictor: Predictor, bankroll: float = 1000, stake: float = 10, fee_rat
     state = load(state_path, bankroll)
     live_odds = use_polymarket and polymarket.available()
     print("PAPER BETTING — fake money only. 15-minute Bitcoin Up or Down.")
-    print(f"Predictor: {predictor.name} | stake ${stake:g}/bet | fee rate {fee_rate} | "
+    print(f"Predictor: {predictor.name} | stake ${stake:g}/bet | fee: market's own ({fee_rate} if unknown) | "
           f"odds: {'Polymarket live (falls back to assumed)' if live_odds else 'assumed 50/50 + spread'}")
     if use_polymarket and not live_odds:
         print("  (For real Polymarket odds: pip3 install polymarket-us)")

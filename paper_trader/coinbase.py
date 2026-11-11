@@ -5,6 +5,7 @@ Read-only price data: no account, no API key, no trading.
 from __future__ import annotations
 
 import json
+import ssl
 import time
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
@@ -58,16 +59,39 @@ def fetch(product: str = "BTC-USD", interval: str = "15m", days: float = 30,
     return parse_candles(raw, g, now=end)
 
 
+def _ssl_context():
+    """Use certifi's certificates when available.
+
+    Python from python.org on macOS ships without system certificates, which
+    causes CERTIFICATE_VERIFY_FAILED. certifi (installed alongside polymarket-us)
+    fixes that without the user running "Install Certificates.command".
+    """
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
+
+
+_CTX = None
+
+
 def _get(url: str, retries: int = 3) -> list:
+    global _CTX
+    if _CTX is None:
+        _CTX = _ssl_context()
     for attempt in range(retries):
         try:
             req = Request(url, headers={"User-Agent": "paper-trader/0.2", "Accept": "application/json"})
-            with urlopen(req, timeout=20) as resp:
+            with urlopen(req, timeout=20, context=_CTX) as resp:
                 data = json.load(resp)
             if isinstance(data, dict):  # error payload, e.g. {"message": "..."}
                 raise RuntimeError(f"Coinbase error: {data.get('message', data)}")
             return data
         except (HTTPError, URLError, TimeoutError) as e:
+            if "CERTIFICATE_VERIFY_FAILED" in str(e):
+                raise RuntimeError(
+                    "Security certificate error. Fix: run  pip3 install certifi  then start the robot again.") from e
             if attempt == retries - 1:
                 raise RuntimeError(f"Could not reach Coinbase ({e}). Check your internet connection.") from e
             time.sleep(2 * (attempt + 1))
